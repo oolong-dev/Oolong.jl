@@ -1,7 +1,25 @@
 export launch
 
 #=
-Design
+# TL;DR
+
+Single Node, Multi GPU
+
+`oolong main.jl --nproc_per_node 8`
+
+Multi Node, Multi GPU
+
+```bash
+export MASTER_ADDR=10.1.2.3
+export MASTER_PORT=9002
+export WORLD_SIZE=16
+export RANK=0
+oolong main.jl --nproc_per_node 8
+```
+
+`oolong` => `julia --project -e "using Oolong; launch()"`
+
+# Design
 
 1. Assume users have a workable cluster which can successfully run a pytorch distributed job.
 
@@ -11,7 +29,7 @@ Design
     - WORLD_SIZE
     - RANK
 
-2. The entrypoint for Oolong is close to torchrun. On each node, by calling `julia -e "using Oolong; launch(;nproc_per_node=8)" main.jl`, we first spawn the specified `nproc_per_node` local processes. Note that these processes are all *worker*s. And the *master* process is the launcher on RANK 0.
+2. The entrypoint for Oolong is close to torchrun. In single node mode, we simply setup `nproc_per_node` local workers (just the same as `julia -p` ). In the distributed mode, each worker will try to connect the the main process specified at `MASTER_ADDR` and `MASTER_PORT`. The implementation is similiar to `ElasticManager` from `ClusterManagers.jl`, except that we need to wait until all the workers are connected.
 
 3. Once all the workers joined the cluster, the master process will do a remote call and setup the default process group. After that, we'll execute `include("main.jl")` everywhere.
 =#
