@@ -39,32 +39,72 @@ using CUDA
 
 function launch(f;
     nproc_per_node=ndevices(),
-    nnode=get(ENV, "WORLD_SIZE", "1"),
-    rank=get(ENV, "RANK", "0"),
-    master_addr=get(ENV, "MASTER_ADDR", "localhost"),
-    master_port=get(ENV, "MASTER_PORT", "9002")
+    nnode=parse(Int, get(ENV, "WORLD_SIZE", "1")),
+    rank=parse(Int, get(ENV, "RANK", "0")),
+    master_addr=get(ENV, "MASTER_ADDR", DEFAULT_MASTER_ADDR),
+    master_port=parse(Int, get(ENV, "MASTER_PORT", "$DEFAULT_MASTER_PORT")),
+    cookie=get(ENV, "OOLONG_COOKIE", DEFAULT_COOKIE),
 )
-    if parse(Int, nnode) == 1
-        addprocs(nproc_per_node)
+    if rank == 0
+        @info "preparing oolong manager..."
+        m = OolongManager(; addr=master_addr, port=master_port, nproc_per_node=nproc_per_node, nnode=nnode, cookie=cookie)
     end
 
-    # 1. Setup the header
-    # 2. Spawn workers
+    @info "setting up local workers..."
     local_workers = Base.Process[]
     # https://github.com/JuliaLang/Distributed.jl/blob/6a0383b9daf5d7f364fd6fc580aac975ca759edd/src/managers.jl#L475
-    env = Dict{String,String}()
+    env = Dict{String,String}(
+        "MASTER_ADDR" => master_addr,
+        "MASTER_PORT" => string(master_port),
+        "WORLD_SIZE" => string(nnode),
+        "NPROC_PER_NODE" => string(nproc_per_node),
+        "RANK" => string(rank),
+        "OOLONG_COOKIE" => cookie,
+    )
     project = Base.ACTIVE_PROJECT[]
     if project !== nothing && get(env, "JULIA_PROJECT", nothing) === nothing
         env["JULIA_PROJECT"] = project
     end
-
     dir = "$(pwd())"
-
-    for i in 1:p
+    for i in 1:nproc_per_node
         env["LOCAL_RANK"] = string(i - 1)
         cmd = `julia -e "using Oolong; Oolong.join_cluster()"`
         ps = open(pipeline(detach(setenv(addenv(cmd, env), dir=dir)); stdout=stdout, stderr=stderr), "r")
         push!(local_workers, ps)
     end
+
+    if rank == 0
+        init(m)
+        @everywhere workers() include(f)
+    end
+
     success(local_workers)
+end
+
+function init(m::OolongManager)
+    @info "waiting for all workers to join..."
+    wait(m.taskref[])
+    @info "all workers joined!"
+
+    # 1. setup device to LOCAL_RANK
+    @info "setting device..."
+    @everywhere workers() begin
+        using CUDA
+        device!(parse(Int, ENV["LOCAL_RANK"]))
+    end
+
+    # 2. create UID at rank 0
+    @info "creating NCCL UniqueID at rank 0..."
+    uid = remotecall_fetch(m.workers[1].userdata["pid"]) do
+        using NCCL
+        NCCL.UniqueID()
+    end
+
+    # 3. init NCCL process group
+    @info "initializing NCCL communicator everywhere..."
+    @everywhere workers() begin
+        using Oolong
+        Oolong.init_process_group($uid)
+    end
+    @info "all done! ready to execute user provided script."
 end
