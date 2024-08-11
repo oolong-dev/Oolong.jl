@@ -34,11 +34,23 @@ oolong main.jl --nproc_per_node 8
 3. Once all the workers joined the cluster, the master process will do a remote call and setup the default process group. After that, we'll execute `include("main.jl")` everywhere.
 =#
 
-function launch(f; p=8)
-    if parse(Int, ENV["RANK"]) == 0
-        oolong_master()
+using Distributed
+using CUDA
+
+function launch(f;
+    nproc_per_node=ndevices(),
+    nnode=get(ENV, "WORLD_SIZE", "1"),
+    rank=get(ENV, "RANK", "0"),
+    master_addr=get(ENV, "MASTER_ADDR", "localhost"),
+    master_port=get(ENV, "MASTER_PORT", "9002")
+)
+    if parse(Int, nnode) == 1
+        addprocs(nproc_per_node)
     end
 
+    # 1. Setup the header
+    # 2. Spawn workers
+    local_workers = Base.Process[]
     # https://github.com/JuliaLang/Distributed.jl/blob/6a0383b9daf5d7f364fd6fc580aac975ca759edd/src/managers.jl#L475
     env = Dict{String,String}()
     project = Base.ACTIVE_PROJECT[]
@@ -47,8 +59,6 @@ function launch(f; p=8)
     end
 
     dir = "$(pwd())"
-
-    local_workers = Base.Process[]
 
     for i in 1:p
         env["LOCAL_RANK"] = string(i - 1)
