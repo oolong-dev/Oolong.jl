@@ -1,5 +1,3 @@
-export launch
-
 #=
 # TL;DR
 
@@ -75,10 +73,10 @@ function launch(f;
 
     if rank == 0
         init(m)
-        @everywhere workers() include(f)
+        @everywhere workers() include($f)
     end
 
-    success(local_workers)
+    # success(local_workers)
 end
 
 function init(m::OolongManager)
@@ -86,24 +84,26 @@ function init(m::OolongManager)
     wait(m.taskref[])
     @info "all workers joined!"
 
+    @eval @everywhere begin
+        using CUDA
+        using NCCL
+    end
+
     # 1. setup device to LOCAL_RANK
     @info "setting device..."
     @everywhere workers() begin
-        using CUDA
-        device!(parse(Int, ENV["LOCAL_RANK"]))
+        CUDA.device!(parse(Int, ENV["LOCAL_RANK"]))
     end
 
     # 2. create UID at rank 0
     @info "creating NCCL UniqueID at rank 0..."
     uid = remotecall_fetch(m.workers[1].userdata["pid"]) do
-        using NCCL
         NCCL.UniqueID()
     end
 
     # 3. init NCCL process group
     @info "initializing NCCL communicator everywhere..."
     @everywhere workers() begin
-        using Oolong
         Oolong.init_process_group($uid)
     end
     @info "all done! ready to execute user provided script."

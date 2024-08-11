@@ -1,3 +1,5 @@
+export get_rank
+
 using Distributed
 using NCCL
 using CUDA
@@ -19,4 +21,5 @@ function init_process_group(id)
     DEFAULT_PROCESS_GROUP[] = ProcessGroup(0:nproc_per_node*world_size-1 |> collect, c)
 end
 
-get_rank(gp::ProcessGroup) = nothing
+get_rank() = get_rank(DEFAULT_PROCESS_GROUP[])
+get_rank(pg::ProcessGroup) = NCCL.rank(pg.communicator)

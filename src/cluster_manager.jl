@@ -15,11 +15,11 @@ struct OolongManager <: ClusterManager
     workers::Matrix{WorkerConfig}
     taskref::Ref{Task}
 
-    function OolongManager(; addr=IPv4(DEFAULT_MASTER_ADDR), port=DEFAULT_MASTER_PORT, nproc_per_node=ndevices(), nnode=1, cookie=DEFAULT_COOKIE)
+    function OolongManager(; addr=DEFAULT_MASTER_ADDR, port=DEFAULT_MASTER_PORT, nproc_per_node=ndevices(), nnode=1, cookie=DEFAULT_COOKIE)
         @assert ':' ∉ cookie
         Distributed.init_multi()
         cluster_cookie(cookie) # it's set to rand string in `init_multi`, we should reset it here
-        l_sock = listen(addr, port)
+        l_sock = listen(IPv4(addr), port)
 
         taskref = Ref{Task}()
         m = new(Matrix{WorkerConfig}(undef, nproc_per_node, nnode), taskref)
