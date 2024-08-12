@@ -75,8 +75,7 @@ function launch(f;
         init(m)
         @everywhere workers() include($f)
     end
-
-    # success(local_workers)
+    success(local_workers)
 end
 
 function init(m::OolongManager)

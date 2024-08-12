@@ -53,13 +53,29 @@ function Distributed.manage(m::OolongManager, id::Integer, config::WorkerConfig,
     if op == :register
         m.workers[local_rank+1, rank+1] = config
     elseif op == :deregister
-        @warn "Worker $rank:$local_rank has exited"
+        @warn "worker $rank:$local_rank is deregistered"
     end
 end
 
 function join_cluster()
+    addr = ENV["MASTER_ADDR"]
+    port = parse(Int, ENV["MASTER_PORT"])
+
+    c = nothing
+    t = Distributed.worker_timeout()
+    for i in 1:round(Int, t)
+        try
+            c = connect(addr, port)
+            break
+        catch
+            @info "failed to connect to master[$addr:$port] after [$i] attempt(s)"
+            sleep(1)
+        end
+    end
+
+    isnothing(c) && throw(ErrorException("unable to connect to master[$addr:$port] within $t seconds"))
+
     cookie = rpad(ENV["OOLONG_COOKIE"], HDR_COOKIE_LEN)[1:HDR_COOKIE_LEN]
-    c = connect(ENV["MASTER_ADDR"], parse(Int, ENV["MASTER_PORT"]))
     write(c, cookie)
     write(c, lpad(ENV["RANK"], RANK_LEN))
     write(c, lpad(ENV["LOCAL_RANK"], LOCAL_RANK_LEN))
